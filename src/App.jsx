@@ -165,41 +165,66 @@ function App() {
     }
   };
 
-  const handleCheckout = (address, paymentMethod) => {
+  const handleCheckout = async (address, paymentMethod) => {
+    if (!user || !user.maKH) {
+      setError('Please log in to place an order');
+      setView('login');
+      return;
+    }
+
+    if (!cart || cart.length === 0) {
+      setError('Your cart is empty');
+      return;
+    }
+
+    const maDH = `DH${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
+
     const orderData = {
-      MaKH: user?.maKH || 'GUEST',
-      NgayDatHang: new Date().toISOString().split('T')[0],
-      TongTien: cart.reduce((sum, item) => sum + item.price * item.quantity, 0),
-      TrangThai: 'Processing',
-      DiaChiGiaoHang: address,
-      ChiTietDonHangs: cart.map((item) => ({
-        MaSP: item.id,
-        SoLuong: item.quantity,
-        Gia: item.price,
+      maDH,
+      maKH: user.maKH,
+      ngayDat: new Date().toISOString().split('T')[0],
+      ngayGiao: null,
+      chitiet: cart.map((item) => ({
+        maSP: item.id,
+        donGia: Number(item.price), // Ensure numeric type
+        vat: 0,
+        soLuong: Number(item.quantity), // Ensure numeric type
       })),
     };
 
-    fetch(`${API_BASE_URL}donhang`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(orderData),
-    })
-      .then((res) => res.json())
-      .then((data) => {
+    try {
+      console.log('Sending orderData:', JSON.stringify(orderData, null, 2)); // Log request data
+      const response = await fetch(`${API_BASE_URL}donhang`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(orderData),
+      });
+      const data = await response.json();
+      console.log('API response:', data); // Log full response
+
+      if (data.status === 'success') {
         alert('Order placed successfully!');
         setCart([]);
         setView('account');
         setOrders([
           ...orders,
           {
-            id: data.MaDH,
-            customer: data.MaKH,
-            date: data.NgayDatHang,
-            status: data.TrangThai,
-            total: data.TongTien,
+            id: data.data.maDH,
+            customer: data.data.maKH,
+            date: data.data.ngayDat,
+            status: 'Processing',
+            total: cart.reduce((sum, item) => sum + item.price * item.quantity, 0),
+            chitiet: data.data.chitiet,
           },
-      ])})
-      .catch(() => setError('Failed to place order'));
+        ]);
+        setError('');
+      } else {
+        throw new Error(data.message || 'Order creation failed');
+      }
+    } catch (err) {
+      console.error('Checkout error:', err, { response: err.response, data }); // Log error details
+      setError('Failed to place order: ' + (data?.errors || err.message));
+    }
   };
 
   const handleAddProduct = (id, name, price, category, image, description, stock) => {
@@ -239,7 +264,7 @@ function App() {
       .catch(() => setError('Failed to add product'));
   };
 
-  const handleUpdateProduct = (id, name, price, category, image, description, stock) => { 
+  const handleUpdateProduct = (id, name, price, category, image, description, stock) => {
     const productData = {
       tenSP: name,
       gia: parseFloat(price),
@@ -249,7 +274,7 @@ function App() {
       soLuongTon: parseInt(stock) || 100,
       loaiSP: '', // thêm nếu backend yêu cầu
     };
-  
+
     fetch(`${API_BASE_URL}sanpham/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -261,14 +286,14 @@ function App() {
           products.map((p) =>
             p.id === id
               ? {
-                  ...p,
-                  name: data.data.tenSP,
-                  price: data.data.gia,
-                  category: data.data.maDM,
-                  image: data.data.hinhAnh,
-                  description: data.data.moTa,
-                  stock: data.data.soLuongTon,
-                }
+                ...p,
+                name: data.data.tenSP,
+                price: data.data.gia,
+                category: data.data.maDM,
+                image: data.data.hinhAnh,
+                description: data.data.moTa,
+                stock: data.data.soLuongTon,
+              }
               : p
           )
         );
@@ -277,7 +302,7 @@ function App() {
       })
       .catch(() => setError('Failed to update product'));
   };
-  
+
 
   const handleDeleteProduct = (id) => {
     fetch(`${API_BASE_URL}sanpham/${id}`, {
@@ -339,7 +364,12 @@ function App() {
           />
         )}
         {view === 'checkout' && (
-          <Checkout handleCheckout={handleCheckout} setError={setError} />
+          <Checkout
+            cart={cart}
+            handleCheckout={handleCheckout}
+            setError={setError}
+            setView={setView}
+          />
         )}
         {view === 'login' && (
           <Login handleLogin={handleLogin} setView={setView} setError={setError} />
@@ -348,7 +378,9 @@ function App() {
         {view === 'account' && user && user.role === 'customer' && (
           <Account orders={orders} user={user} setView={setView} />
         )}
-        {view === 'review' && <Review setView={setView} setError={setError} />}
+        {view === 'review' && (
+          <Review setView={setView} setError={setError} user={user} orders={orders} />
+        )}
         {view === 'admin' && user && user.role === 'admin' && (
           <AdminDashboard
             products={products}
